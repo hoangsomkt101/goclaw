@@ -15,6 +15,27 @@ func SendMessage(ctx context.Context, sess *Session, threadID string, threadType
 	return SendMessageWithMentions(ctx, sess, threadID, threadType, text, nil)
 }
 
+// SendResult identifies a successfully submitted Zalo message. Both IDs are
+// required by follow-up APIs such as reaction and undo.
+type SendResult struct {
+	MessageID       string `json:"message_id"`
+	ClientMessageID string `json:"client_message_id"`
+}
+
+// MessageQuote contains the source-message fields required by Zalo's native
+// quote endpoint.
+type MessageQuote struct {
+	OwnerID         string
+	MessageID       string
+	ClientMessageID string
+	MessageType     string
+	Timestamp       string
+	Content         string
+	PropertyExt     any
+	Attachment      any
+	TTL             int64
+}
+
 // Mention identifies a UTF-16 range in a group message for a native Zalo mention.
 // Zalo's web API uses JavaScript string offsets, hence UTF-16 rather than Go byte offsets.
 type Mention struct {
@@ -26,11 +47,18 @@ type Mention struct {
 
 // SendMessageWithMentions sends a text message with optional native group mentions.
 func SendMessageWithMentions(ctx context.Context, sess *Session, threadID string, threadType ThreadType, text string, mentions []Mention) (string, error) {
+	result, err := SendMessageWithOptions(ctx, sess, threadID, threadType, text, mentions, nil)
+	return result.MessageID, err
+}
+
+// SendMessageWithOptions sends text with optional mentions and a native quote,
+// returning the server and client IDs used for later message operations.
+func SendMessageWithOptions(ctx context.Context, sess *Session, threadID string, threadType ThreadType, text string, mentions []Mention, quote *MessageQuote) (SendResult, error) {
 	if text == "" {
-		return "", fmt.Errorf("zalo_personal: message text cannot be empty")
+		return SendResult{}, fmt.Errorf("zalo_personal: message text cannot be empty")
 	}
 	if len(mentions) > 0 && threadType != ThreadTypeGroup {
-		return "", fmt.Errorf("zalo_personal: mentions are only supported in group messages")
+		return SendResult{}, fmt.Errorf("zalo_personal: mentions are only supported in group messages")
 	}
 
 	serviceKey := "chat"
@@ -46,13 +74,14 @@ func SendMessageWithMentions(ctx context.Context, sess *Session, threadID string
 
 	baseURL := getServiceURL(sess, serviceKey)
 	if baseURL == "" {
-		return "", fmt.Errorf("zalo_personal: no service URL for %s", serviceKey)
+		return SendResult{}, fmt.Errorf("zalo_personal: no service URL for %s", serviceKey)
 	}
 
 	// Build payload
+	clientID := time.Now().UnixMilli()
 	payload := map[string]any{
 		"message":  text,
-		"clientId": time.Now().UnixMilli(),
+		"clientId": clientID,
 		"ttl":      0,
 	}
 	if threadType == ThreadTypeGroup {
@@ -61,7 +90,7 @@ func SendMessageWithMentions(ctx context.Context, sess *Session, threadID string
 		if len(mentions) > 0 {
 			mentionJSON, err := json.Marshal(mentions)
 			if err != nil {
-				return "", fmt.Errorf("zalo_personal: encode mentions: %w", err)
+				return SendResult{}, fmt.Errorf("zalo_personal: encode mentions: %w", err)
 			}
 			payload["mentionInfo"] = string(mentionJSON)
 		}
@@ -69,11 +98,40 @@ func SendMessageWithMentions(ctx context.Context, sess *Session, threadID string
 		payload["toid"] = threadID
 		payload["imei"] = sess.IMEI
 	}
+	if quote != nil {
+		payload["qmsgOwner"] = quote.OwnerID
+		payload["qmsgId"] = quote.MessageID
+		payload["qmsgCliId"] = quote.ClientMessageID
+		payload["qmsgType"] = clientMessageType(quote.MessageType)
+		payload["qmsgTs"] = quote.Timestamp
+		payload["qmsg"] = quote.Content
+		if quote.Attachment != nil {
+			payload["qmsg"] = ""
+		}
+		payload["qmsgTTL"] = quote.TTL
+		quoteAttachment := quote.PropertyExt
+		if quote.Attachment != nil {
+			quoteAttachment = prepareQuoteAttachment(quote.Attachment)
+		}
+		if threadType == ThreadTypeGroup && quoteAttachment != nil {
+			attachment, err := json.Marshal(quoteAttachment)
+			if err != nil {
+				return SendResult{}, fmt.Errorf("zalo_personal: encode quote attachment: %w", err)
+			}
+			payload["qmsgAttach"] = string(attachment)
+		}
+	}
 
 	// Encrypt payload with session secret key
 	encData, err := encryptPayload(sess, payload)
 	if err != nil {
-		return "", fmt.Errorf("zalo_personal: encrypt send payload: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: encrypt send payload: %w", err)
+	}
+	if quote != nil {
+		apiPath = "/api/message/quote"
+		if threadType == ThreadTypeGroup {
+			apiPath = "/api/group/quote"
+		}
 	}
 
 	// Build URL with standard params
@@ -83,41 +141,85 @@ func SendMessageWithMentions(ctx context.Context, sess *Session, threadID string
 	form := buildFormBody(map[string]string{"params": encData})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, form)
 	if err != nil {
-		return "", err
+		return SendResult{}, err
 	}
 	setDefaultHeaders(req, sess)
 
 	resp, err := sess.Client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("zalo_personal: send message: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: send message: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Send response is encrypted: {"error_code":0, "data":"<encrypted>"}
 	var envelope Response[*string]
 	if err := readJSON(resp, &envelope); err != nil {
-		return "", fmt.Errorf("zalo_personal: parse send response: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: parse send response: %w", err)
 	}
 	if envelope.ErrorCode != 0 {
-		return "", fmt.Errorf("zalo_personal: send error code %d", envelope.ErrorCode)
+		return SendResult{}, fmt.Errorf("zalo_personal: send error code %d", envelope.ErrorCode)
 	}
 	if envelope.Data == nil {
-		return "", nil
+		return SendResult{ClientMessageID: fmt.Sprint(clientID)}, nil
 	}
 
 	plain, err := decryptDataField(sess, *envelope.Data)
 	if err != nil {
-		return "", fmt.Errorf("zalo_personal: decrypt send response: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: decrypt send response: %w", err)
 	}
 
 	var result struct {
 		MsgID json.Number `json:"msgId"`
 	}
 	if err := json.Unmarshal(plain, &result); err != nil {
-		return "", fmt.Errorf("zalo_personal: parse send result: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: parse send result: %w", err)
 	}
 
-	return result.MsgID.String(), nil
+	return SendResult{MessageID: result.MsgID.String(), ClientMessageID: fmt.Sprint(clientID)}, nil
+}
+
+func prepareQuoteAttachment(value any) any {
+	source, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	result := make(map[string]any, len(source)+3)
+	for key, item := range source {
+		result[key] = item
+	}
+	if thumb, ok := source["thumb"]; ok {
+		result["thumbUrl"] = thumb
+	}
+	if href, ok := source["href"]; ok {
+		result["oriUrl"] = href
+		result["normalUrl"] = href
+	}
+	return result
+}
+
+func clientMessageType(messageType string) int {
+	switch messageType {
+	case "chat.voice":
+		return 31
+	case "chat.photo":
+		return 32
+	case "chat.sticker":
+		return 36
+	case "chat.doodle":
+		return 37
+	case "chat.recommended", "chat.link":
+		return 38
+	case "chat.location.new":
+		return 43
+	case "chat.video.msg":
+		return 44
+	case "share.file":
+		return 46
+	case "chat.gif":
+		return 49
+	default:
+		return 1
+	}
 }
 
 // SendTypingEvent sends a typing indicator to a user or group.

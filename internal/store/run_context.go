@@ -21,15 +21,23 @@ type runContextKey struct{}
 // accessor functions (which fall back to individual keys when RunContext is absent).
 type RunContext struct {
 	// Identity
-	AgentID          uuid.UUID
-	AgentKey         string
-	TenantID         uuid.UUID
-	UserID           string
-	RunID            string
-	SessionKey       string
-	CredentialUserID string // resolved tenant user for credential lookups (empty = use UserID)
-	AgentType        string
-	SenderID         string
+	AgentID           uuid.UUID
+	AgentKey          string
+	TenantID          uuid.UUID
+	UserID            string
+	RunID             string
+	SessionKey        string
+	CredentialUserID  string // resolved tenant user for credential lookups (empty = use UserID)
+	AgentType         string
+	SenderID          string
+	MessageID         string // current inbound platform message ID
+	ClientMessageID   string // current inbound platform client message ID
+	MessageType       string // current inbound platform message type
+	MessageTimestamp  string // current inbound platform timestamp
+	MessageContent    string // current inbound content used by native quote APIs
+	MessageProperty   string // current inbound platform propertyExt JSON
+	MessageAttachment string // current inbound attachment JSON for native quote
+	MessageTTL        string // current inbound platform TTL
 
 	// Flags
 	SelfEvolve          bool

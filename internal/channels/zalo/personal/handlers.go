@@ -68,10 +68,10 @@ func (c *Channel) handleDM(msg protocol.UserMessage) {
 	}
 
 	metadata := map[string]string{
-		"message_id":   msg.Data.MsgID,
 		"platform":     channels.TypeZaloPersonal,
 		"display_name": channels.SanitizeDisplayName(senderName),
 	}
+	addZaloMessageMetadata(metadata, msg.Data, senderID, channels.Truncate(content, 2000))
 	c.HandleMessage(senderID, threadID, content, media, metadata, "direct")
 }
 
@@ -148,11 +148,11 @@ func (c *Channel) handleGroupMessage(msg protocol.GroupMessage) {
 	}
 
 	metadata := map[string]string{
-		"message_id":   msg.Data.MsgID,
 		"platform":     channels.TypeZaloPersonal,
 		"group_id":     threadID,
 		"display_name": channels.SanitizeDisplayName(senderName),
 	}
+	addZaloMessageMetadata(metadata, msg.Data.TMessage, senderID, channels.Truncate(content, 2000))
 	c.HandleMessage(senderID, threadID, finalContent, allMedia, metadata, "group")
 
 	// Clear pending history after sending to agent (matches Telegram/Discord/Slack/Feishu pattern).

@@ -17,16 +17,20 @@ type Message interface {
 
 // TMessage is the raw JSON message payload from Zalo WebSocket.
 type TMessage struct {
-	MsgID   string  `json:"msgId"`
-	UIDFrom string  `json:"uidFrom"`
-	IDTo    string  `json:"idTo"`
-	DName   string  `json:"dName"`
-	TS      string  `json:"ts"`
-	Content Content `json:"content"`
-	MsgType string  `json:"msgType"`
-	CMD     int     `json:"cmd"`
-	ST      int     `json:"st"`
-	AT      int     `json:"at"`
+	MsgID       string  `json:"msgId"`
+	CliMsgID    string  `json:"cliMsgId"`
+	RealMsgID   string  `json:"realMsgId"`
+	UIDFrom     string  `json:"uidFrom"`
+	IDTo        string  `json:"idTo"`
+	DName       string  `json:"dName"`
+	TS          string  `json:"ts"`
+	Content     Content `json:"content"`
+	MsgType     string  `json:"msgType"`
+	PropertyExt any     `json:"propertyExt,omitempty"`
+	TTL         int64   `json:"ttl,omitempty"`
+	CMD         int     `json:"cmd"`
+	ST          int     `json:"st"`
+	AT          int     `json:"at"`
 }
 
 // TGroupMessage extends TMessage with group-specific fields.
@@ -37,7 +41,7 @@ type TGroupMessage struct {
 
 // TMention represents an @mention in a group message.
 type TMention struct {
-	UID  string      `json:"uid"`  // user ID or "-1" for @all
+	UID  string      `json:"uid"` // user ID or "-1" for @all
 	Pos  int         `json:"pos"`
 	Len  int         `json:"len"`
 	Type MentionType `json:"type"` // 0=individual, 1=all
@@ -47,9 +51,9 @@ type TMention struct {
 type MentionType int
 
 const (
-	MentionEach MentionType = 0
-	MentionAll  MentionType = 1
-	MentionAllUID           = "-1"
+	MentionEach   MentionType = 0
+	MentionAll    MentionType = 1
+	MentionAllUID             = "-1"
 )
 
 // Content is a union type: can be a plain string or an attachment object.

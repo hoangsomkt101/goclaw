@@ -19,7 +19,16 @@ var routingMetaKeys = []string{
 }
 
 var finalReplyMetaKeys = append([]string{
-	"placeholder_key", // final outbound can update placeholder; block replies must not
+	"placeholder_key",        // final outbound can update placeholder; block replies must not
+	"zalo_message_id",        // Zalo native quote target (final reply only)
+	"zalo_client_message_id", // paired client ID for quote/reaction
+	"zalo_message_sender_id", // original quote owner
+	"zalo_message_type",      // maps to Zalo qmsgType
+	"zalo_message_timestamp", // original qmsgTs
+	"zalo_message_content",   // quoted text preview
+	"zalo_message_property_ext",
+	"zalo_message_attachment",
+	"zalo_message_ttl",
 }, routingMetaKeys...)
 
 func copySelectedMeta(src map[string]string, keys []string) map[string]string {

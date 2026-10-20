@@ -5,6 +5,16 @@ import (
 	"testing"
 )
 
+func TestTMessageUnmarshalIncludesPairedMessageIDs(t *testing.T) {
+	var msg TMessage
+	if err := json.Unmarshal([]byte(`{"msgId":"7001","cliMsgId":"8001","realMsgId":"9001","uidFrom":"123","ts":"1700000000000","msgType":"webchat","content":"hello"}`), &msg); err != nil {
+		t.Fatal(err)
+	}
+	if msg.MsgID != "7001" || msg.CliMsgID != "8001" || msg.RealMsgID != "9001" {
+		t.Fatalf("message IDs = msg:%q cli:%q real:%q", msg.MsgID, msg.CliMsgID, msg.RealMsgID)
+	}
+}
+
 func TestContent_UnmarshalJSON_String(t *testing.T) {
 	var c Content
 	if err := json.Unmarshal([]byte(`"hello world"`), &c); err != nil {

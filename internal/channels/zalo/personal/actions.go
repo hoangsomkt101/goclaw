@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,6 +191,52 @@ func (c *Channel) InvokeNativeAction(ctx context.Context, req channels.NativeAct
 			return nil, fmt.Errorf("zalo_personal: active must be a boolean")
 		}
 		return protocol.UpdateActiveStatus(ctx, sess, active)
+	case "quote_message":
+		text, err := requiredString(req.Params, "message")
+		if err != nil {
+			return nil, err
+		}
+		messageID, err := requiredString(req.Params, "message_id")
+		if err != nil {
+			return nil, err
+		}
+		ownerID, err := requiredString(req.Params, "message_sender_id")
+		if err != nil {
+			return nil, err
+		}
+		timestamp, err := requiredString(req.Params, "message_timestamp")
+		if err != nil {
+			return nil, err
+		}
+		messageType := stringValue(req.Params, "message_type")
+		if messageType == "" {
+			messageType = "webchat"
+		}
+		propertyExt, err := optionalQuoteJSON(req.Params, "message_property_ext")
+		if err != nil {
+			return nil, err
+		}
+		attachment, err := optionalQuoteJSON(req.Params, "message_attachment")
+		if err != nil {
+			return nil, err
+		}
+		var ttl int64
+		if rawTTL := stringValue(req.Params, "message_ttl"); rawTTL != "" {
+			ttl, err = strconv.ParseInt(rawTTL, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("zalo_personal: message_ttl must be an integer")
+			}
+		}
+		result, err := protocol.SendMessageWithOptions(ctx, sess, req.ChatID, threadType, text, nil, &protocol.MessageQuote{
+			OwnerID: ownerID, MessageID: messageID, ClientMessageID: stringValue(req.Params, "client_message_id"),
+			MessageType: messageType, Timestamp: timestamp, Content: stringValue(req.Params, "quoted_content"),
+			PropertyExt: propertyExt, Attachment: attachment, TTL: ttl,
+		})
+		if err != nil {
+			return nil, err
+		}
+		c.trackSentMessage(req.ChatID, threadType, "quote", result)
+		return result, nil
 	case "react":
 		messageID, err := requiredString(req.Params, "message_id")
 		if err != nil {
@@ -204,6 +251,31 @@ func (c *Channel) InvokeNativeAction(ctx context.Context, req channels.NativeAct
 			return nil, err
 		}
 		return protocol.AddReaction(ctx, sess, req.ChatID, threadType, messageID, clientMessageID, icon)
+	case "undo_message":
+		target, err := c.findTrackedSentMessage(req.ChatID,
+			stringValue(req.Params, "message_id"), stringValue(req.Params, "client_message_id"))
+		if err != nil {
+			return nil, err
+		}
+		result, err := protocol.UndoMessage(ctx, sess, req.ChatID, threadType, target.MessageID, target.ClientMessageID)
+		if err != nil {
+			return nil, err
+		}
+		c.markTrackedMessageRecalled(req.ChatID, target.MessageID, target.ClientMessageID)
+		return map[string]any{"message_id": target.MessageID, "client_message_id": target.ClientMessageID, "response": result}, nil
+	case "list_sent_messages":
+		items := c.trackedSentMessages(req.ChatID)
+		count := int(int64Value(req.Params, "count"))
+		if count <= 0 {
+			count = 20
+		}
+		if count > 100 {
+			count = 100
+		}
+		if len(items) > count {
+			items = items[:count]
+		}
+		return items, nil
 	default:
 		return nil, fmt.Errorf("zalo_personal: action %q is not in the native API allowlist", req.Action)
 	}
@@ -289,4 +361,16 @@ func requiredInt64(params map[string]any, key string) (int64, error) {
 func boolValue(params map[string]any, key string) bool {
 	value, _ := params[key].(bool)
 	return value
+}
+
+func optionalQuoteJSON(params map[string]any, key string) (any, error) {
+	raw := stringValue(params, key)
+	if raw == "" {
+		return nil, nil
+	}
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return nil, fmt.Errorf("zalo_personal: %s must be valid JSON: %w", key, err)
+	}
+	return value, nil
 }

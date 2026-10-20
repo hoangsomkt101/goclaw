@@ -38,6 +38,25 @@ func TestCopyFinalRoutingMeta_PreservesPlaceholderAndPancakeMode(t *testing.T) {
 	}
 }
 
+func TestZaloQuoteMetadataIsFinalReplyOnly(t *testing.T) {
+	src := map[string]string{
+		"zalo_message_id": "m1", "zalo_client_message_id": "c1",
+		"zalo_message_sender_id": "u1", "zalo_message_type": "webchat",
+		"zalo_message_timestamp": "1700000000000", "zalo_message_content": "hello",
+		"zalo_message_property_ext": `{"color":0}`, "zalo_message_attachment": `{"href":"photo.jpg"}`,
+		"zalo_message_ttl": "0",
+	}
+	final := CopyFinalRoutingMeta(src)
+	for key, value := range src {
+		if final[key] != value {
+			t.Fatalf("final[%q] = %q, want %q", key, final[key], value)
+		}
+	}
+	if followup := CopyFollowupRoutingMeta(src); len(followup) != 0 {
+		t.Fatalf("follow-up metadata must not repeat native quote: %#v", followup)
+	}
+}
+
 // TestCopyRoutingMeta_PreservesPancakePrivateReplyKeys verifies the metadata
 // keys used by the private_reply DM (post_id, display_name, sender_id)
 // survive inbound→outbound copy.

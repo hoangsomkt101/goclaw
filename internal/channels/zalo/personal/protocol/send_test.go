@@ -133,3 +133,12 @@ func TestBuildMultipartBody(t *testing.T) {
 		t.Error("body does not contain filename")
 	}
 }
+
+func TestPrepareQuoteAttachmentAddsZaloURLFields(t *testing.T) {
+	prepared := prepareQuoteAttachment(map[string]any{
+		"href": "https://example.com/photo.jpg", "thumb": "https://example.com/thumb.jpg", "title": "photo",
+	}).(map[string]any)
+	if prepared["oriUrl"] != "https://example.com/photo.jpg" || prepared["normalUrl"] != "https://example.com/photo.jpg" || prepared["thumbUrl"] != "https://example.com/thumb.jpg" {
+		t.Fatalf("prepared = %#v", prepared)
+	}
+}

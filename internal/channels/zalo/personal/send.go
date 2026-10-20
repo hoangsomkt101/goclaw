@@ -2,6 +2,7 @@ package personal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -59,7 +60,7 @@ func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 
 	// Send text content (if any remains after media).
 	if msg.Content != "" {
-		return c.sendChunkedText(ctx, sess, msg.ChatID, threadType, msg.Content, outboundMentions)
+		return c.sendChunkedText(ctx, sess, msg.ChatID, threadType, msg.Content, outboundMentions, quoteFromMetadata(msg.Metadata))
 	}
 	return nil
 }
@@ -71,7 +72,10 @@ func (c *Channel) sendImage(ctx context.Context, sess *protocol.Session, chatID 
 		return fmt.Errorf("upload: %w", err)
 	}
 
-	_, err = protocol.SendImage(ctx, sess, chatID, threadType, upload, caption)
+	result, err := protocol.SendImageTracked(ctx, sess, chatID, threadType, upload, caption)
+	if err == nil {
+		c.trackSentMessage(chatID, threadType, "image", result)
+	}
 	return err
 }
 
@@ -86,13 +90,16 @@ func (c *Channel) sendFile(ctx context.Context, sess *protocol.Session, chatID s
 		return fmt.Errorf("upload: %w", err)
 	}
 
-	_, err = protocol.SendFile(ctx, sess, chatID, threadType, upload)
+	result, err := protocol.SendFileTracked(ctx, sess, chatID, threadType, upload)
+	if err == nil {
+		c.trackSentMessage(chatID, threadType, "file", result)
+	}
 	return err
 }
 
-func (c *Channel) sendChunkedText(ctx context.Context, sess *protocol.Session, chatID string, threadType protocol.ThreadType, text string, mentions []outboundMention) error {
+func (c *Channel) sendChunkedText(ctx context.Context, sess *protocol.Session, chatID string, threadType protocol.ThreadType, text string, mentions []outboundMention, quote *protocol.MessageQuote) error {
 	searchFrom := 0
-	for _, chunk := range channels.ChunkMarkdown(text, maxTextLength) {
+	for index, chunk := range channels.ChunkMarkdown(text, maxTextLength) {
 		relativeStart := strings.Index(text[searchFrom:], chunk)
 		chunkStart := searchFrom
 		if relativeStart >= 0 {
@@ -113,12 +120,51 @@ func (c *Channel) sendChunkedText(ctx context.Context, sess *protocol.Session, c
 				})
 			}
 		}
-		if _, err := protocol.SendMessageWithMentions(ctx, sess, chatID, threadType, chunk, nativeMentions); err != nil {
+		chunkQuote := quote
+		if index > 0 {
+			chunkQuote = nil
+		}
+		result, err := protocol.SendMessageWithOptions(ctx, sess, chatID, threadType, chunk, nativeMentions, chunkQuote)
+		if err != nil {
 			return err
 		}
+		c.trackSentMessage(chatID, threadType, "text", result)
 		searchFrom = chunkEnd
 	}
 	return nil
+}
+
+func quoteFromMetadata(metadata map[string]string) *protocol.MessageQuote {
+	if metadata == nil || metadata[metaZaloMessageID] == "" || metadata[metaZaloMessageSenderID] == "" || metadata[metaZaloMessageTS] == "" {
+		return nil
+	}
+	messageType := metadata[metaZaloMessageType]
+	if messageType == "" {
+		messageType = "webchat"
+	}
+	quote := &protocol.MessageQuote{
+		OwnerID: metadata[metaZaloMessageSenderID], MessageID: metadata[metaZaloMessageID],
+		ClientMessageID: metadata[metaZaloClientMessageID], MessageType: messageType,
+		Timestamp: metadata[metaZaloMessageTS], Content: metadata[metaZaloMessageContent],
+	}
+	if value := metadata[metaZaloMessageTTL]; value != "" {
+		quote.TTL, _ = strconv.ParseInt(value, 10, 64)
+	}
+	quote.PropertyExt = decodeQuoteMetadata(metadata[metaZaloMessageProperty])
+	quote.Attachment = decodeQuoteMetadata(metadata[metaZaloMessageAttach])
+	return quote
+}
+
+func decodeQuoteMetadata(raw string) any {
+	if raw == "" {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		slog.Debug("zalo_personal: invalid quote metadata", "error", err)
+		return nil
+	}
+	return value
 }
 
 type outboundMention struct {

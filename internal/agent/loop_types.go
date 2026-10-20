@@ -619,6 +619,14 @@ type RunRequest struct {
 	UserID             string             // external user ID (TEXT, free-form) for multi-tenant scoping
 	SenderID           string             // original individual sender ID (preserved in group chats for permission checks)
 	SenderName         string             // display name from channel metadata (for bootstrap auto-contact)
+	MessageID          string             // current inbound platform message ID
+	ClientMessageID    string             // paired platform client message ID (Zalo reaction/quote)
+	MessageType        string             // platform-native message type
+	MessageTimestamp   string             // platform-native message timestamp
+	MessageContent     string             // original message content for native quote
+	MessageProperty    string             // platform-native propertyExt JSON for media quote
+	MessageAttachment  string             // platform-native attachment JSON for media quote
+	MessageTTL         string             // platform-native message TTL
 	Role               string             // caller's RBAC role (admin/operator/viewer/owner); bypasses per-user grants for authenticated admins (#915)
 	Stream             bool               // whether to stream response chunks
 	ExtraSystemPrompt  string             // optional: injected into system prompt (skills, subagent context, etc.)

@@ -22,9 +22,9 @@ type ImageUploadResult struct {
 	HDUrl        string      `json:"hdUrl"`
 	ThumbURL     string      `json:"thumbUrl"`
 	PhotoID      json.Number `json:"photoId"`      // Zalo may return string or number
-	ClientFileID json.Number `json:"clientFileId"`  // Zalo may return string or number
+	ClientFileID json.Number `json:"clientFileId"` // Zalo may return string or number
 	ChunkID      int         `json:"chunkId"`
-	Finished     FlexBool    `json:"finished"`      // Zalo returns bool or int depending on endpoint
+	Finished     FlexBool    `json:"finished"` // Zalo returns bool or int depending on endpoint
 
 	// Set by caller (not from API response).
 	Width     int `json:"-"`
@@ -135,14 +135,21 @@ func UploadImage(ctx context.Context, sess *Session, threadID string, threadType
 
 // SendImage sends a previously uploaded image as a message.
 func SendImage(ctx context.Context, sess *Session, threadID string, threadType ThreadType, upload *ImageUploadResult, caption string) (string, error) {
+	result, err := SendImageTracked(ctx, sess, threadID, threadType, upload, caption)
+	return result.MessageID, err
+}
+
+// SendImageTracked sends an image and returns both IDs needed by later message APIs.
+func SendImageTracked(ctx context.Context, sess *Session, threadID string, threadType ThreadType, upload *ImageUploadResult, caption string) (SendResult, error) {
 	fileURL := getServiceURL(sess, "file")
 	if fileURL == "" {
-		return "", fmt.Errorf("zalo_personal: no file service URL")
+		return SendResult{}, fmt.Errorf("zalo_personal: no file service URL")
 	}
 
+	clientID := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	params := map[string]any{
 		"photoId":  upload.PhotoID,
-		"clientId": strconv.FormatInt(time.Now().UnixMilli(), 10),
+		"clientId": clientID,
 		"desc":     caption,
 		"width":    upload.Width,
 		"height":   upload.Height,
@@ -164,7 +171,7 @@ func SendImage(ctx context.Context, sess *Session, threadID string, threadType T
 
 	encData, err := encryptPayload(sess, params)
 	if err != nil {
-		return "", fmt.Errorf("zalo_personal: encrypt image send params: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: encrypt image send params: %w", err)
 	}
 
 	pathPrefix := "/api/message/"
@@ -177,39 +184,39 @@ func SendImage(ctx context.Context, sess *Session, threadID string, threadType T
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, form)
 	if err != nil {
-		return "", err
+		return SendResult{}, err
 	}
 	setDefaultHeaders(req, sess)
 
 	resp, err := sess.Client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("zalo_personal: send image: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: send image: %w", err)
 	}
 	defer resp.Body.Close()
 
 	var envelope Response[*string]
 	if err := readJSON(resp, &envelope); err != nil {
-		return "", fmt.Errorf("zalo_personal: parse image send response: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: parse image send response: %w", err)
 	}
 	if envelope.ErrorCode != 0 {
-		return "", fmt.Errorf("zalo_personal: image send error code %d", envelope.ErrorCode)
+		return SendResult{}, fmt.Errorf("zalo_personal: image send error code %d", envelope.ErrorCode)
 	}
 	if envelope.Data == nil {
-		return "", nil
+		return SendResult{ClientMessageID: clientID}, nil
 	}
 
 	plain, err := decryptDataField(sess, *envelope.Data)
 	if err != nil {
-		return "", fmt.Errorf("zalo_personal: decrypt image send response: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: decrypt image send response: %w", err)
 	}
 
 	var result struct {
 		MsgID json.Number `json:"msgId"`
 	}
 	if err := json.Unmarshal(plain, &result); err != nil {
-		return "", fmt.Errorf("zalo_personal: parse image send result: %w", err)
+		return SendResult{}, fmt.Errorf("zalo_personal: parse image send result: %w", err)
 	}
-	return result.MsgID.String(), nil
+	return SendResult{MessageID: result.MsgID.String(), ClientMessageID: clientID}, nil
 }
 
 // imageDimensions extracts width and height from an image (PNG, JPEG, etc.).

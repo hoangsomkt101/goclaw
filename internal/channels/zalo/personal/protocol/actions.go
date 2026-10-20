@@ -372,6 +372,30 @@ func AddReaction(ctx context.Context, sess *Session, threadID string, threadType
 	return encryptedRequest(ctx, sess, "reaction", path, http.MethodPost, payload, false)
 }
 
+// UndoMessage recalls a message previously sent by the authenticated account.
+func UndoMessage(ctx context.Context, sess *Session, threadID string, threadType ThreadType, messageID, clientMessageID string) (json.RawMessage, error) {
+	if messageID == "" || clientMessageID == "" {
+		return nil, fmt.Errorf("zalo_personal: message_id and client_message_id are required")
+	}
+	payload := map[string]any{
+		"msgId":        messageID,
+		"clientId":     time.Now().UnixMilli(),
+		"cliMsgIdUndo": clientMessageID,
+	}
+	service := "chat"
+	path := "/api/message/undo"
+	if threadType == ThreadTypeGroup {
+		service = "group"
+		path = "/api/group/undomsg"
+		payload["grid"] = threadID
+		payload["visibility"] = 0
+		payload["imei"] = sess.IMEI
+	} else {
+		payload["toid"] = threadID
+	}
+	return encryptedRequest(ctx, sess, service, path, http.MethodPost, payload, false)
+}
+
 // FetchGroupMembers retrieves the full member ID list and resolves display profiles.
 func FetchGroupMembers(ctx context.Context, sess *Session, groupID string) ([]GroupMemberInfo, error) {
 	gridVerMap, err := json.Marshal(map[string]int{groupID: 0})

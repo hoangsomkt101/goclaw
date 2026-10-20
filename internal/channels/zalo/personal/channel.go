@@ -20,8 +20,10 @@ import (
 // WARNING: Zalo Personal is an unofficial, reverse-engineered integration. Account may be locked/banned.
 type Channel struct {
 	*channels.BaseChannel
-	config      config.ZaloPersonalConfig
-	typingCtrls sync.Map // threadID → *typing.Controller
+	config       config.ZaloPersonalConfig
+	typingCtrls  sync.Map // threadID → *typing.Controller
+	sentMu       sync.RWMutex
+	sentMessages map[string][]SentMessage // threadID → bounded oldest-to-newest records
 
 	mu       sync.RWMutex // protects sess and listener
 	sess     *protocol.Session
@@ -57,9 +59,10 @@ func New(cfg config.ZaloPersonalConfig, msgBus *bus.MessageBus, pairingSvc store
 	}
 
 	ch := &Channel{
-		BaseChannel: base,
-		config:      cfg,
-		stopCh:      make(chan struct{}),
+		BaseChannel:  base,
+		config:       cfg,
+		stopCh:       make(chan struct{}),
+		sentMessages: make(map[string][]SentMessage),
 	}
 	ch.SetPairingService(pairingSvc)
 	ch.SetGroupHistory(channels.MakeHistory(channels.TypeZaloPersonal, pendingStore, base.TenantID()))
