@@ -93,6 +93,7 @@ func builtinToolSeedData() []store.BuiltinToolDef {
 		// messaging
 		{Name: "message", DisplayName: "Message", Description: "Send a proactive message to a user on a connected channel (Telegram, Discord, etc.)", Category: "messaging", Enabled: true},
 		{Name: "send_file", DisplayName: "Send File", Description: "Send an existing workspace file as an attachment in the current chat (does not create or modify the file)", Category: "messaging", Enabled: true},
+		{Name: "zalo_personal", DisplayName: "Zalo Personal", Description: "Use allowlisted native Zalo Personal APIs for polls, reminders, notes, groups, friends, links, pin/mute, profile, and reactions", Category: "messaging", Enabled: true},
 
 		// scheduling
 		{Name: "cron", DisplayName: "Cron Scheduler", Description: "Schedule or manage recurring tasks using cron expressions, at-times, or intervals", Category: "scheduling", Enabled: true,

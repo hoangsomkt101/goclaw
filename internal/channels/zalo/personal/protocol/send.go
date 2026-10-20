@@ -12,15 +12,36 @@ import (
 // SendMessage sends a text message to a user or group.
 // threadID: user UID (DM) or group ID (group).
 func SendMessage(ctx context.Context, sess *Session, threadID string, threadType ThreadType, text string) (string, error) {
+	return SendMessageWithMentions(ctx, sess, threadID, threadType, text, nil)
+}
+
+// Mention identifies a UTF-16 range in a group message for a native Zalo mention.
+// Zalo's web API uses JavaScript string offsets, hence UTF-16 rather than Go byte offsets.
+type Mention struct {
+	Pos  int    `json:"pos"`
+	UID  string `json:"uid"`
+	Len  int    `json:"len"`
+	Type int    `json:"type"`
+}
+
+// SendMessageWithMentions sends a text message with optional native group mentions.
+func SendMessageWithMentions(ctx context.Context, sess *Session, threadID string, threadType ThreadType, text string, mentions []Mention) (string, error) {
 	if text == "" {
 		return "", fmt.Errorf("zalo_personal: message text cannot be empty")
+	}
+	if len(mentions) > 0 && threadType != ThreadTypeGroup {
+		return "", fmt.Errorf("zalo_personal: mentions are only supported in group messages")
 	}
 
 	serviceKey := "chat"
 	apiPath := "/api/message/sms"
 	if threadType == ThreadTypeGroup {
 		serviceKey = "group"
-		apiPath = "/api/group/sendmsg"
+		if len(mentions) > 0 {
+			apiPath = "/api/group/mention"
+		} else {
+			apiPath = "/api/group/sendmsg"
+		}
 	}
 
 	baseURL := getServiceURL(sess, serviceKey)
@@ -37,6 +58,13 @@ func SendMessage(ctx context.Context, sess *Session, threadID string, threadType
 	if threadType == ThreadTypeGroup {
 		payload["grid"] = threadID
 		payload["visibility"] = 0
+		if len(mentions) > 0 {
+			mentionJSON, err := json.Marshal(mentions)
+			if err != nil {
+				return "", fmt.Errorf("zalo_personal: encode mentions: %w", err)
+			}
+			payload["mentionInfo"] = string(mentionJSON)
+		}
 	} else {
 		payload["toid"] = threadID
 		payload["imei"] = sess.IMEI
@@ -161,6 +189,14 @@ func getServiceURL(sess *Session, service string) string {
 		urls = sess.LoginInfo.ZpwServiceMapV3.Profile
 	case "group_poll":
 		urls = sess.LoginInfo.ZpwServiceMapV3.GroupPoll
+	case "group_board":
+		urls = sess.LoginInfo.ZpwServiceMapV3.GroupBoard
+	case "friend":
+		urls = sess.LoginInfo.ZpwServiceMapV3.Friend
+	case "conversation":
+		urls = sess.LoginInfo.ZpwServiceMapV3.Conversation
+	case "reaction":
+		urls = sess.LoginInfo.ZpwServiceMapV3.Reaction
 	}
 	if len(urls) == 0 {
 		return ""

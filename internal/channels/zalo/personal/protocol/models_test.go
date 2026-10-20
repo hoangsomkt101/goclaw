@@ -6,7 +6,7 @@ import (
 )
 
 func TestServerInfo_UnmarshalJSON_CorrectSpelling(t *testing.T) {
-	raw := `{"settings":{"features":{"socket":{"ping_interval":30000}},"keepalive":{"alway_keepalive":1}}}`
+	raw := `{"settings":{"features":{"socket":{"ping_interval":30000}},"keepalive":{"alway_keepalive":1}},"extra_ver":{"phonebook":42}}`
 
 	var si ServerInfo
 	if err := json.Unmarshal([]byte(raw), &si); err != nil {
@@ -17,6 +17,9 @@ func TestServerInfo_UnmarshalJSON_CorrectSpelling(t *testing.T) {
 	}
 	if si.Settings.Features.Socket.PingInterval != 30000 {
 		t.Errorf("PingInterval = %d, want 30000", si.Settings.Features.Socket.PingInterval)
+	}
+	if si.ExtraVer.Phonebook != 42 {
+		t.Errorf("Phonebook = %d, want 42", si.ExtraVer.Phonebook)
 	}
 }
 

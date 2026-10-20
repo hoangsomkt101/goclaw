@@ -26,17 +26,27 @@ type LoginInfo struct {
 
 // ZpwServiceMapV3 holds Zalo service endpoint URLs.
 type ZpwServiceMapV3 struct {
-	Chat      []string `json:"chat"`
-	Group     []string `json:"group"`
-	File      []string `json:"file"`
-	Profile   []string `json:"profile"`
-	GroupPoll []string `json:"group_poll"`
+	Chat         []string `json:"chat"`
+	Group        []string `json:"group"`
+	File         []string `json:"file"`
+	Profile      []string `json:"profile"`
+	GroupPoll    []string `json:"group_poll"`
+	GroupBoard   []string `json:"group_board"`
+	Friend       []string `json:"friend"`
+	Conversation []string `json:"conversation"`
+	Reaction     []string `json:"reaction"`
 	// Only fields needed for GoClaw; Zalo returns many more.
 }
 
 // ServerInfo from getServerInfo response.
 type ServerInfo struct {
-	Settings *Settings `json:"settings"`
+	Settings *Settings    `json:"settings"`
+	ExtraVer ExtraVersion `json:"extra_ver"`
+}
+
+// ExtraVersion carries server-side profile/contact version cursors.
+type ExtraVersion struct {
+	Phonebook int `json:"phonebook"`
 }
 
 // UnmarshalJSON handles Zalo's typo: "setttings" (3 t's) vs "settings".
@@ -44,6 +54,11 @@ func (s *ServerInfo) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
+	}
+	if value, ok := raw["extra_ver"]; ok {
+		if err := json.Unmarshal(value, &s.ExtraVer); err != nil {
+			return err
+		}
 	}
 	for _, k := range []string{"settings", "setttings"} {
 		if v, ok := raw[k]; ok {

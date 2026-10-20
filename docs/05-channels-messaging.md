@@ -242,7 +242,7 @@ flowchart TD
 | Forum/Topics | Yes (per-topic config) | Yes (topic session mode) | -- | -- | -- | -- | -- |
 | Message limit | 4,096 chars | Configurable (default 4,000) | 2,000 chars | 4,000 chars | WhatsApp native limit | 2,000 chars | 2,000 chars |
 | Streaming | Typing indicator | Streaming message cards | Edit "Thinking..." | Edit "Thinking..." (throttled 1s) | No | No | No |
-| Media | Photos, voice, files | Images, files (30 MB) | Files, embeds | Files (download w/ SSRF protection) | Images, audio, video, documents | Images (5 MB) | -- |
+| Media | Photos, voice, files | Images, files (30 MB) | Files, embeds | Files (download w/ SSRF protection) | Images, audio, video, documents | Images (5 MB) | Images and files |
 | Speech-to-text | Yes (STT proxy) | -- | -- | -- | -- | -- | -- |
 | Voice routing | Yes (VoiceAgentID) | -- | -- | -- | -- | -- | -- |
 | Rich formatting | Markdown → HTML | Card messages | Markdown | Markdown → mrkdwn | Plain text | Plain text | Plain text |
@@ -667,6 +667,12 @@ The Zalo Personal channel provides access to personal Zalo accounts using a reve
 | Default group policy | N/A | `allowlist` (restrictive) |
 | Authentication | API credentials | Pre-loaded credentials or QR scan |
 | Risk | None | Account may be locked/banned |
+
+### Native Actions and Mentions
+
+The channel-aware `zalo_personal` tool exposes a fixed action allowlist for polls, notes, reminders, group members and deputies, friend requests, group invite links, conversation pin/mute, profile status, and reactions. It is scoped to the current live channel instance. Membership, friend, invite-link, delete/lock, and account-profile actions require explicit user confirmation and `confirm=true`.
+
+`list_group_members` is supported for Zalo groups. Outbound text in the form `@[Display name](zalo_uid)` is converted to a native Zalo mention; positions and lengths are encoded as UTF-16 units to match the web protocol.
 
 ### Security Warning
 

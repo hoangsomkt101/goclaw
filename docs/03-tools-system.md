@@ -138,7 +138,8 @@ Memory layers: L1 (`memory_search`) returns ranked abstracts; L2 (`memory_expand
 | `message` | Send a message to a channel |
 | `send_file` | Send an existing workspace file as a chat attachment (with optional caption); marks `DeliveredMedia` to prevent duplicate delivery |
 | `create_forum_topic` | Create a Telegram forum topic |
-| `list_group_members` | List members in a group chat (Feishu/Lark) |
+| `list_group_members` | List members in a group chat (Feishu/Lark or Zalo Personal) |
+| `zalo_personal` | Allowlisted native Zalo Personal actions: polls, reminders, notes, group/friend/link management, pin/mute, profile, reactions |
 
 ### Delegation
 
@@ -365,7 +366,7 @@ flowchart TD
 | `memory` | `memory_search`, `memory_get` |
 | `sessions` | `sessions_list`, `sessions_history`, `sessions_send`, `spawn`, `session_status` |
 | `automation` | `cron` |
-| `messaging` | `message`, `create_forum_topic`, `list_group_members` |
+| `messaging` | `message`, `create_forum_topic`, `list_group_members`, `zalo_personal` |
 | `team` | `team_tasks` |
 | `goclaw` | All native built-in tools (composite) |
 

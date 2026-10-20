@@ -28,11 +28,13 @@ func NewListGroupMembersTool() *ListGroupMembersTool {
 
 func (t *ListGroupMembersTool) SetGroupMemberLister(l GroupMemberLister) { t.lister = l }
 
-func (t *ListGroupMembersTool) RequiredChannelTypes() []string { return []string{"feishu"} }
+func (t *ListGroupMembersTool) RequiredChannelTypes() []string {
+	return []string{"feishu", "zalo_personal"}
+}
 
 func (t *ListGroupMembersTool) Name() string { return "list_group_members" }
 func (t *ListGroupMembersTool) Description() string {
-	return "List all members of the current group chat. Returns member IDs (open_id) and display names. Only works in group conversations on supported channels (Lark/Feishu). Use this to find out who is in the group, check attendance, or identify members. To @mention a member in a message, use @member_id (e.g. @ou_abc123) — it will be converted to a native mention with notification."
+	return "List all members of the current group chat. Returns member IDs and display names on Lark/Feishu and Zalo Personal. Use this to identify members before mentioning them. Lark mention syntax is @member_id; Zalo Personal syntax is @[Display name](zalo_uid), which is converted to a native mention with notification."
 }
 
 func (t *ListGroupMembersTool) Parameters() map[string]any {

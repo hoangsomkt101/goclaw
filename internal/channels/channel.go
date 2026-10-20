@@ -670,6 +670,21 @@ type GroupMemberProvider interface {
 	ListGroupMembers(ctx context.Context, chatID string) ([]GroupMember, error)
 }
 
+// NativeActionRequest is a channel-scoped request for an integration-specific API.
+// The tool layer supplies the current conversation context; channel implementations
+// must still enforce their own fixed action allowlist.
+type NativeActionRequest struct {
+	Action   string
+	ChatID   string
+	PeerKind string
+	Params   map[string]any
+}
+
+// NativeActionProvider is optionally implemented by channels with native API actions.
+type NativeActionProvider interface {
+	InvokeNativeAction(ctx context.Context, req NativeActionRequest) (any, error)
+}
+
 // PendingCompactable is optionally implemented by channels that have a PendingHistory
 // supporting LLM-based compaction. InstanceLoader uses this to wire compaction config
 // after channel creation.

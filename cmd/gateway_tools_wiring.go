@@ -63,6 +63,8 @@ func wireExtraTools(
 	toolsReg.Register(tools.NewSendFileTool(workspace, agentCfg.RestrictToWorkspace))
 	// Group members tool (list members in group chats)
 	toolsReg.Register(tools.NewListGroupMembersTool())
+	// Zalo Personal native API bridge (strict action allowlist).
+	toolsReg.Register(tools.NewZaloPersonalTool())
 	slog.Info("session + message + send_file tools registered")
 
 	// Register legacy tool aliases (backward-compat names from policy.go).

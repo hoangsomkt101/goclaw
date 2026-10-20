@@ -322,6 +322,21 @@ func (m *Manager) ListGroupMembers(ctx context.Context, channelName, chatID stri
 	return gmp.ListGroupMembers(ctx, chatID)
 }
 
+// InvokeNativeAction delegates a channel-specific API action to a live channel.
+func (m *Manager) InvokeNativeAction(ctx context.Context, channelName string, req NativeActionRequest) (any, error) {
+	m.mu.RLock()
+	ch, ok := m.channels[channelName]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("channel %q not found", channelName)
+	}
+	provider, ok := ch.(NativeActionProvider)
+	if !ok {
+		return nil, fmt.Errorf("channel %q does not support native actions", channelName)
+	}
+	return provider.InvokeNativeAction(ctx, req)
+}
+
 // UnregisterChannel removes a channel from the manager.
 func (m *Manager) UnregisterChannel(name string) {
 	m.mu.Lock()

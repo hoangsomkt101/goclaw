@@ -29,6 +29,7 @@ type Session struct {
 
 	LoginInfo *LoginInfo
 	Settings  *Settings
+	ExtraVer  ExtraVersion
 	CookieJar http.CookieJar
 	Client    *http.Client
 }

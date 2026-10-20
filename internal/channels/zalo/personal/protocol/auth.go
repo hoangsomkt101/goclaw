@@ -70,6 +70,7 @@ func LoginWithCredentials(ctx context.Context, sess *Session, cred Credentials) 
 	sess.SecretKey = loginInfo.ZPWEnk
 	sess.LoginInfo = loginInfo
 	sess.Settings = serverInfo.Settings
+	sess.ExtraVer = serverInfo.ExtraVer
 
 	// Seed cookies for every service-map host so that API calls to
 	// subdomains like tt-group-poll-wpa.chat.zalo.me carry zpw_sek.
@@ -96,6 +97,10 @@ func seedServiceMapCookies(sess *Session, cred Credentials) {
 	allURLs = append(allURLs, sm.File...)
 	allURLs = append(allURLs, sm.Profile...)
 	allURLs = append(allURLs, sm.GroupPoll...)
+	allURLs = append(allURLs, sm.GroupBoard...)
+	allURLs = append(allURLs, sm.Friend...)
+	allURLs = append(allURLs, sm.Conversation...)
+	allURLs = append(allURLs, sm.Reaction...)
 
 	seen := make(map[string]struct{}, len(allURLs))
 	for _, raw := range allURLs {

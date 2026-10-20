@@ -526,6 +526,12 @@ func runGateway() {
 			gl.SetGroupMemberLister(channelMgr.ListGroupMembers)
 		}
 	}
+	// Wire native channel actions on the Zalo Personal tool.
+	if t, ok := toolsReg.Get("zalo_personal"); ok {
+		if native, ok := t.(tools.NativeActionInvokerAware); ok {
+			native.SetNativeActionInvoker(channelMgr.InvokeNativeAction)
+		}
+	}
 
 	// Load channel instances from DB.
 	var instanceLoader *channels.InstanceLoader
