@@ -3,6 +3,7 @@ package personal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
@@ -11,13 +12,10 @@ import (
 	"unicode/utf16"
 
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
-	"github.com/nextlevelbuilder/goclaw/internal/channels"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/typing"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/zalo"
 	"github.com/nextlevelbuilder/goclaw/internal/channels/zalo/personal/protocol"
 )
-
-const maxTextLength = 2000
 
 // Send delivers an outbound message to a Zalo chat.
 func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
@@ -26,9 +24,9 @@ func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 		return fmt.Errorf("zalo_personal channel not running")
 	}
 
-	// Preserve explicit Zalo mention markup while stripping other Markdown.
-	var outboundMentions []outboundMention
-	msg.Content, outboundMentions = parseOutboundMentions(msg.Content)
+	// Translate agent Markdown to Zalo's native styles while preserving explicit
+	// mention markup as native mention ranges.
+	formatted, outboundMentions := formatOutboundMessage(msg.Content)
 
 	// Stop typing indicator before sending response
 	if ctrl, ok := c.typingCtrls.LoadAndDelete(msg.ChatID); ok {
@@ -59,8 +57,8 @@ func (c *Channel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	}
 
 	// Send text content (if any remains after media).
-	if msg.Content != "" {
-		return c.sendChunkedText(ctx, sess, msg.ChatID, threadType, msg.Content, outboundMentions, quoteFromMetadata(msg.Metadata))
+	if formatted.Text != "" {
+		return c.sendChunkedText(ctx, sess, msg.ChatID, threadType, formatted, outboundMentions, quoteFromMetadata(msg.Metadata))
 	}
 	return nil
 }
@@ -97,39 +95,45 @@ func (c *Channel) sendFile(ctx context.Context, sess *protocol.Session, chatID s
 	return err
 }
 
-func (c *Channel) sendChunkedText(ctx context.Context, sess *protocol.Session, chatID string, threadType protocol.ThreadType, text string, mentions []outboundMention, quote *protocol.MessageQuote) error {
-	searchFrom := 0
-	for index, chunk := range channels.ChunkMarkdown(text, maxTextLength) {
-		relativeStart := strings.Index(text[searchFrom:], chunk)
-		chunkStart := searchFrom
-		if relativeStart >= 0 {
-			chunkStart += relativeStart
-		}
-		chunkEnd := chunkStart + len(chunk)
+func (c *Channel) sendChunkedText(ctx context.Context, sess *protocol.Session, chatID string, threadType protocol.ThreadType, formatted zalo.FormattedMessage, mentions []outboundMention, quote *protocol.MessageQuote) error {
+	protected := make([]zalo.TextRange, 0, len(mentions))
+	for _, mention := range mentions {
+		protected = append(protected, zalo.TextRange{Start: mention.Start, End: mention.End})
+	}
+	for index, chunk := range zalo.ChunkFormattedMessage(formatted, protected) {
 		var nativeMentions []protocol.Mention
 		if threadType == protocol.ThreadTypeGroup {
 			for _, mention := range mentions {
-				if mention.Start < chunkStart || mention.End > chunkEnd {
+				if mention.Start < chunk.Start || mention.End > chunk.End {
 					continue
 				}
-				localStart := mention.Start - chunkStart
-				localEnd := mention.End - chunkStart
 				nativeMentions = append(nativeMentions, protocol.Mention{
-					Pos: utf16Length(chunk[:localStart]), UID: mention.UID,
-					Len: utf16Length(chunk[localStart:localEnd]), Type: mentionType(mention.UID),
+					Pos: mention.Start - chunk.Start, UID: mention.UID,
+					Len: mention.End - mention.Start, Type: mentionType(mention.UID),
 				})
 			}
+		}
+		nativeStyles := make([]protocol.TextStyle, 0, len(chunk.Styles))
+		for _, style := range chunk.Styles {
+			nativeStyles = append(nativeStyles, protocol.TextStyle{Start: style.Start, Len: style.Len, Style: style.Style})
 		}
 		chunkQuote := quote
 		if index > 0 {
 			chunkQuote = nil
 		}
-		result, err := protocol.SendMessageWithOptions(ctx, sess, chatID, threadType, chunk, nativeMentions, chunkQuote)
+		result, err := protocol.SendMessageWithNativeOptions(ctx, sess, chatID, threadType, chunk.Text, nativeMentions, nativeStyles, chunkQuote)
+		if err != nil && (len(nativeStyles) > 0 || len(nativeMentions) > 0) {
+			var apiErr *protocol.SendAPIError
+			if errors.As(err, &apiErr) {
+				slog.Warn("zalo_personal: native formatting rejected; retrying plain text",
+					"chat_id", chatID, "chunk", index+1, "error_code", apiErr.Code)
+				result, err = protocol.SendMessageWithOptions(ctx, sess, chatID, threadType, chunk.Text, nil, chunkQuote)
+			}
+		}
 		if err != nil {
 			return err
 		}
 		c.trackSentMessage(chatID, threadType, "text", result)
-		searchFrom = chunkEnd
 	}
 	return nil
 }
@@ -169,7 +173,7 @@ func decodeQuoteMetadata(raw string) any {
 
 type outboundMention struct {
 	UID        string
-	Start, End int // byte offsets in the final plain-text message
+	Start, End int // UTF-16 offsets in the final display text
 }
 
 type mentionSpec struct {
@@ -181,9 +185,9 @@ var (
 	mentionMarkerRE = regexp.MustCompile("\uE000([0-9]+)\uE001")
 )
 
-// parseOutboundMentions converts @[Display name](zalo_uid) into visible @Display name
-// text while retaining exact ranges for Zalo's native mentionInfo payload.
-func parseOutboundMentions(input string) (string, []outboundMention) {
+// formatOutboundMessage converts Markdown and @[Display name](zalo_uid) markup
+// together so styles and mentions retain correct UTF-16 offsets.
+func formatOutboundMessage(input string) (zalo.FormattedMessage, []outboundMention) {
 	var specs []mentionSpec
 	marked := mentionMarkupRE.ReplaceAllStringFunc(input, func(match string) string {
 		parts := mentionMarkupRE.FindStringSubmatch(match)
@@ -191,31 +195,77 @@ func parseOutboundMentions(input string) (string, []outboundMention) {
 		specs = append(specs, mentionSpec{Name: parts[1], UID: parts[2]})
 		return "\uE000" + strconv.Itoa(index) + "\uE001"
 	})
-	plain := zalo.StripMarkdown(marked)
+	formatted := zalo.FormatMarkdown(marked)
 	if len(specs) == 0 {
-		return plain, nil
+		return formatted, nil
 	}
 
-	matches := mentionMarkerRE.FindAllStringSubmatchIndex(plain, -1)
+	matches := mentionMarkerRE.FindAllStringSubmatchIndex(formatted.Text, -1)
 	var output strings.Builder
 	mentions := make([]outboundMention, 0, len(matches))
+	type replacement struct {
+		oldStart, oldEnd int
+		newStart, newEnd int
+	}
+	replacements := make([]replacement, 0, len(matches))
 	cursor := 0
+	newOffset := 0
 	for _, match := range matches {
-		output.WriteString(plain[cursor:match[0]])
-		index, err := strconv.Atoi(plain[match[2]:match[3]])
+		prefix := formatted.Text[cursor:match[0]]
+		output.WriteString(prefix)
+		newOffset += utf16Length(prefix)
+		index, err := strconv.Atoi(formatted.Text[match[2]:match[3]])
 		if err != nil || index < 0 || index >= len(specs) {
-			output.WriteString(plain[match[0]:match[1]])
+			marker := formatted.Text[match[0]:match[1]]
+			output.WriteString(marker)
+			newOffset += utf16Length(marker)
 			cursor = match[1]
 			continue
 		}
 		visible := "@" + specs[index].Name
-		start := output.Len()
+		oldStart := utf16Length(formatted.Text[:match[0]])
+		oldEnd := oldStart + utf16Length(formatted.Text[match[0]:match[1]])
+		start := newOffset
 		output.WriteString(visible)
-		mentions = append(mentions, outboundMention{UID: specs[index].UID, Start: start, End: output.Len()})
+		newOffset += utf16Length(visible)
+		mentions = append(mentions, outboundMention{UID: specs[index].UID, Start: start, End: newOffset})
+		replacements = append(replacements, replacement{oldStart: oldStart, oldEnd: oldEnd, newStart: start, newEnd: newOffset})
 		cursor = match[1]
 	}
-	output.WriteString(plain[cursor:])
-	return output.String(), mentions
+	output.WriteString(formatted.Text[cursor:])
+
+	mapBoundary := func(position int, endBoundary bool) int {
+		delta := 0
+		for _, item := range replacements {
+			if position <= item.oldStart {
+				return position + delta
+			}
+			if position < item.oldEnd {
+				if endBoundary {
+					return item.newEnd
+				}
+				return item.newStart
+			}
+			delta += (item.newEnd - item.newStart) - (item.oldEnd - item.oldStart)
+		}
+		return position + delta
+	}
+	styles := make([]zalo.TextStyle, 0, len(formatted.Styles))
+	for _, style := range formatted.Styles {
+		start := mapBoundary(style.Start, false)
+		end := mapBoundary(style.Start+style.Len, true)
+		if end > start {
+			styles = append(styles, zalo.TextStyle{Start: start, Len: end - start, Style: style.Style})
+		}
+	}
+	return zalo.FormattedMessage{Text: output.String(), Styles: styles}, mentions
+}
+
+// parseOutboundMentions remains as a small compatibility helper for tests and
+// callers that only need the final visible text and mention ranges.
+func parseOutboundMentions(input string) (string, []outboundMention) {
+	formatted, mentions := formatOutboundMessage(input)
+	return formatted.Text, mentions
 }
 
 func utf16Length(value string) int { return len(utf16.Encode([]rune(value))) }

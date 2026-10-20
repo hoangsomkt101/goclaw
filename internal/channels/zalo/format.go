@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// StripMarkdown removes markdown formatting artifacts from text, producing
-// clean plain text suitable for Zalo which does not support any markup.
+// StripMarkdown removes Markdown artifacts for plain-text Zalo surfaces and
+// compatibility fallbacks. Zalo Personal uses FormatMarkdown for native styles.
 func StripMarkdown(text string) string {
 	if text == "" {
 		return text

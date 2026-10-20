@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -111,6 +112,75 @@ func TestSendMessageWithMentionsRequestShape(t *testing.T) {
 	}
 	if messageID != "123" {
 		t.Fatalf("messageID = %q", messageID)
+	}
+}
+
+func TestSendMessageWithNativeStylesRequestShape(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/message/sms" || r.Method != http.MethodPost {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		plain, err := DecodeAESCBC(key, r.Form.Get("params"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(plain, &captured); err != nil {
+			t.Fatal(err)
+		}
+		inner := `{"error_code":0,"data":{"msgId":321}}`
+		encrypted, err := EncodeAESCBC(key, inner, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(Response[*string]{Data: &encrypted})
+	}))
+	defer server.Close()
+
+	sess := &Session{
+		IMEI: "imei-1", SecretKey: base64.StdEncoding.EncodeToString(key), Client: server.Client(),
+		LoginInfo: &LoginInfo{ZpwServiceMapV3: ZpwServiceMapV3{Chat: []string{server.URL}}},
+	}
+	result, err := SendMessageWithNativeOptions(context.Background(), sess, "user-1", ThreadTypeUser, "😀 đậm", nil,
+		[]TextStyle{{Start: 3, Len: 4, Style: "b"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MessageID != "321" {
+		t.Fatalf("result = %+v", result)
+	}
+	var properties struct {
+		Styles  []TextStyle `json:"styles"`
+		Version int         `json:"ver"`
+	}
+	if err := json.Unmarshal([]byte(captured["textProperties"].(string)), &properties); err != nil {
+		t.Fatal(err)
+	}
+	if properties.Version != 0 || len(properties.Styles) != 1 || properties.Styles[0].Start != 3 || properties.Styles[0].Style != "b" {
+		t.Fatalf("textProperties = %+v", properties)
+	}
+}
+
+func TestSendMessageReturnsStructuredAPIError(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(Response[*string]{ErrorCode: -201, ErrorMessage: "format rejected"})
+	}))
+	defer server.Close()
+
+	sess := &Session{
+		IMEI: "imei-1", SecretKey: base64.StdEncoding.EncodeToString(key), Client: server.Client(),
+		LoginInfo: &LoginInfo{ZpwServiceMapV3: ZpwServiceMapV3{Chat: []string{server.URL}}},
+	}
+	_, err := SendMessageWithNativeOptions(context.Background(), sess, "user-1", ThreadTypeUser, "hello", nil,
+		[]TextStyle{{Start: 0, Len: 5, Style: "b"}}, nil)
+	var apiErr *SendAPIError
+	if !errors.As(err, &apiErr) || apiErr.Code != -201 {
+		t.Fatalf("error = %T %v", err, err)
 	}
 }
 

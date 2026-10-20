@@ -542,10 +542,20 @@ func buildRuntimeSection(cfg SystemPromptConfig) []string {
 }
 
 // buildChannelFormattingHint returns platform-specific formatting guidance.
-// Zalo does not render any markup, so we instruct the model to use plain text.
+// Zalo Personal translates a conservative Markdown subset into native styles;
+// the official Zalo channel still receives plain text.
 func buildChannelFormattingHint(channelType string) []string {
 	switch channelType {
-	case "zalo", "zalo_personal":
+	case "zalo_personal":
+		return []string{
+			"## Output Formatting",
+			"",
+			"This channel (Zalo Personal) converts Markdown into native Zalo formatting.",
+			"You may use headings, **bold**, *italic*, ~~strikethrough~~, inline code, fenced code blocks, links, blockquotes, and simple lists.",
+			"Keep formatting purposeful and avoid HTML or deeply nested Markdown.",
+			"",
+		}
+	case "zalo":
 		return []string{
 			"## Output Formatting",
 			"",

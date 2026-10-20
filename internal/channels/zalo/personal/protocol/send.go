@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"time"
 )
@@ -45,6 +46,29 @@ type Mention struct {
 	Type int    `json:"type"`
 }
 
+// TextStyle identifies a UTF-16 range formatted with one of Zalo's native
+// style codes (for example b, i, s, or f_18).
+type TextStyle struct {
+	Start int    `json:"start"`
+	Len   int    `json:"len"`
+	Style string `json:"st"`
+}
+
+// SendAPIError means Zalo parsed and explicitly rejected a send request. It is
+// intentionally distinct from transport and response-decoding failures so a
+// caller can safely retry a formatting rejection without duplicating a message.
+type SendAPIError struct {
+	Code    int
+	Message string
+}
+
+func (e *SendAPIError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("zalo_personal: send error code %d: %s", e.Code, e.Message)
+	}
+	return fmt.Sprintf("zalo_personal: send error code %d", e.Code)
+}
+
 // SendMessageWithMentions sends a text message with optional native group mentions.
 func SendMessageWithMentions(ctx context.Context, sess *Session, threadID string, threadType ThreadType, text string, mentions []Mention) (string, error) {
 	result, err := SendMessageWithOptions(ctx, sess, threadID, threadType, text, mentions, nil)
@@ -54,6 +78,12 @@ func SendMessageWithMentions(ctx context.Context, sess *Session, threadID string
 // SendMessageWithOptions sends text with optional mentions and a native quote,
 // returning the server and client IDs used for later message operations.
 func SendMessageWithOptions(ctx context.Context, sess *Session, threadID string, threadType ThreadType, text string, mentions []Mention, quote *MessageQuote) (SendResult, error) {
+	return SendMessageWithNativeOptions(ctx, sess, threadID, threadType, text, mentions, nil, quote)
+}
+
+// SendMessageWithNativeOptions sends text with optional native mentions,
+// styles, and quote metadata.
+func SendMessageWithNativeOptions(ctx context.Context, sess *Session, threadID string, threadType ThreadType, text string, mentions []Mention, styles []TextStyle, quote *MessageQuote) (SendResult, error) {
 	if text == "" {
 		return SendResult{}, fmt.Errorf("zalo_personal: message text cannot be empty")
 	}
@@ -83,6 +113,16 @@ func SendMessageWithOptions(ctx context.Context, sess *Session, threadID string,
 		"message":  text,
 		"clientId": clientID,
 		"ttl":      0,
+	}
+	if len(styles) > 0 {
+		textProperties, err := json.Marshal(struct {
+			Styles  []TextStyle `json:"styles"`
+			Version int         `json:"ver"`
+		}{Styles: styles})
+		if err != nil {
+			return SendResult{}, fmt.Errorf("zalo_personal: encode text styles: %w", err)
+		}
+		payload["textProperties"] = string(textProperties)
 	}
 	if threadType == ThreadTypeGroup {
 		payload["grid"] = threadID
@@ -157,7 +197,7 @@ func SendMessageWithOptions(ctx context.Context, sess *Session, threadID string,
 		return SendResult{}, fmt.Errorf("zalo_personal: parse send response: %w", err)
 	}
 	if envelope.ErrorCode != 0 {
-		return SendResult{}, fmt.Errorf("zalo_personal: send error code %d", envelope.ErrorCode)
+		return SendResult{}, &SendAPIError{Code: envelope.ErrorCode, Message: envelope.ErrorMessage}
 	}
 	if envelope.Data == nil {
 		return SendResult{ClientMessageID: fmt.Sprint(clientID)}, nil
@@ -184,9 +224,7 @@ func prepareQuoteAttachment(value any) any {
 		return value
 	}
 	result := make(map[string]any, len(source)+3)
-	for key, item := range source {
-		result[key] = item
-	}
+	maps.Copy(result, source)
 	if thumb, ok := source["thumb"]; ok {
 		result["thumbUrl"] = thumb
 	}
