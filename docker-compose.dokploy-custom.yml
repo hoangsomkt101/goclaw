@@ -1,0 +1,112 @@
+
+services:
+  goclaw:
+    # Build custom source from GitHub branch "custom"
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ENABLE_EMBEDUI: "true"
+        ENABLE_PYTHON: "true"
+        ENABLE_NODE: "true"
+        ENABLE_FULL_SKILLS: "false"
+        ENABLE_OTEL: "false"
+        ENABLE_TSNET: "false"
+        ENABLE_REDIS: "false"
+        VERSION: "custom"
+
+    image: goclaw-custom:local
+    restart: unless-stopped
+    init: true
+
+    expose:
+      - "18790"
+
+    environment:
+      GOCLAW_HOST: "0.0.0.0"
+      GOCLAW_PORT: "18790"
+      GOCLAW_CONFIG: "/app/data/config.json"
+
+      GOCLAW_GATEWAY_TOKEN: "${GOCLAW_GATEWAY_TOKEN:?GOCLAW_GATEWAY_TOKEN is required}"
+      GOCLAW_ENCRYPTION_KEY: "${GOCLAW_ENCRYPTION_KEY:?GOCLAW_ENCRYPTION_KEY is required}"
+
+      GOCLAW_POSTGRES_DSN: "postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable"
+
+      GOCLAW_SKILLS_DIR: "/app/data/skills"
+
+      GOCLAW_TRACE_VERBOSE: "${GOCLAW_TRACE_VERBOSE:-0}"
+      BITRIX24_LOG_RAW_EVENT: "${BITRIX24_LOG_RAW_EVENT:-0}"
+      BITRIX24_FORCE_REREGISTER: "${BITRIX24_FORCE_REREGISTER:-0}"
+      BITRIX24_DEBUG_UNREDACTED_TOKEN: "${BITRIX24_DEBUG_UNREDACTED_TOKEN:-0}"
+
+    volumes:
+      - goclaw-data:/app/data
+      - goclaw-workspace:/app/workspace
+      - goclaw-skills:/app/skills
+      - goclaw-workspace:/app/.goclaw
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    cap_add:
+      - SETUID
+      - SETGID
+      - CHOWN
+
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: "2.0"
+          pids: 200
+
+    networks:
+      - goclaw-internal
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-goclaw}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+      POSTGRES_DB: "${POSTGRES_DB:-goclaw}"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-goclaw} -d ${POSTGRES_DB:-goclaw}"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    networks:
+      - goclaw-internal
+
+volumes:
+  goclaw-data:
+  goclaw-workspace:
+  goclaw-skills:
+  postgres-data:
+
+networks:
+  goclaw-internal:
+    driver: bridge
